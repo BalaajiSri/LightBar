@@ -45,6 +45,12 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 @property BOOL audioRequested, audioStarted;
 @property NSUInteger audioGeneration;
 @property MusicEngine musicEngine;
+@property (strong) NSPopUpButton *paletteMenu;
+@property (strong) NSPanel *palettePanel;
+@property (strong) NSArray<NSColorWell *> *paletteWells;
+@property (strong) NSArray<NSArray<NSString *> *> *paletteHex;
+@property (strong) NSArray<NSColor *> *customPalette;
+@property (strong) NSColor *blendedPalette;
 @property (strong) NSButton *experimentalSwitch;
 @property (strong) NSPanel *experimentPanel;
 @property (strong) NSTextField *tempoLabel, *confidenceLabel;
@@ -89,11 +95,18 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     NSArray *colors=@[[NSColor colorWithSRGBRed:1 green:0.15 blue:0.2 alpha:1],NSColor.orangeColor,NSColor.systemGreenColor,NSColor.systemBlueColor,NSColor.systemPurpleColor,NSColor.whiteColor];
     NSArray *names=@[@"Red",@"Amber",@"Green",@"Blue",@"Purple",@"White"];
     for(NSInteger i=0;i<6;i++){ NSButton *b=[self button:@"●" action:@selector(preset:) x:34+i*48 y:400 width:40]; b.tag=i; b.font=[NSFont systemFontOfSize:23]; b.bordered=NO; b.contentTintColor=colors[i]; b.accessibilityLabel=names[i]; b.toolTip=names[i]; [self.lightControls addObject:b]; }
-    self.color=[[NSColorWell alloc] initWithFrame:NSMakeRect(356,400,46,28)]; self.color.color=[NSColor orangeColor]; self.color.target=self; self.color.action=@selector(colour:); self.color.accessibilityLabel=@"Custom light colour"; [self.popover.contentViewController.view addSubview:self.color]; [self.lightControls addObject:self.color]; self.preview.lightColor=self.color.color;
+    self.color=[[NSColorWell alloc] initWithFrame:NSMakeRect(356,400,46,28)]; self.color.color=[self colorFromHex:[[NSUserDefaults standardUserDefaults] stringForKey:@"StaticLightColor"]?:@"FF640A"]; self.color.target=self; self.color.action=@selector(colour:); self.color.accessibilityLabel=@"Custom light colour"; [self.popover.contentViewController.view addSubview:self.color]; [self.lightControls addObject:self.color]; self.preview.lightColor=self.color.color;
     self.brightnessLabel=[self label:@"Brightness · 70%" x:36 y:370 width:240]; self.brightnessLabel.font=[NSFont systemFontOfSize:12];
     self.brightness=[NSSlider sliderWithValue:70 minValue:0 maxValue:100 target:self action:@selector(brightnessChanged:)]; self.brightness.frame=NSMakeRect(36,343,366,22); self.brightness.continuous=NO; self.brightness.accessibilityLabel=@"Brightness"; [self.popover.contentViewController.view addSubview:self.brightness]; [self.lightControls addObject:self.brightness];
     [self heading:@"MUSIC, IN COLOUR" x:36 y:257];
-    NSTextField *description=[self label:@"Bass, beats and stereo. One adaptive mix." x:36 y:235 width:370]; description.font=[NSFont systemFontOfSize:12]; description.textColor=NSColor.secondaryLabelColor;
+    self.paletteHex=@[@[],@[@"FF3864",@"9B5CFF",@"2DE2E6"],@[@"FF6B35",@"F73670",@"8B5CF6"],@[@"00D9A5",@"45B8FF",@"AA7DFF"],@[@"FF392E",@"FF9438",@"FFD080"],@[@"164BFF",@"00B8D9",@"75F7DC"]];
+    NSArray *stored=[[NSUserDefaults standardUserDefaults] arrayForKey:@"CustomMusicPalette"];
+    NSMutableArray *custom=[NSMutableArray new];
+    for(int i=0;i<3;i++) [custom addObject:[self colorFromHex:(stored.count==3 && [stored[i] isKindOfClass:NSString.class])?stored[i]:self.paletteHex[1][i]]]; self.customPalette=custom;
+    self.paletteMenu=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(34,229,254,28) pullsDown:NO];
+    [self.paletteMenu addItemsWithTitles:@[@"Original spectrum",@"Neon · pink / violet / cyan",@"Sunset · coral / rose / violet",@"Aurora · mint / sky / lilac",@"Ember · red / amber / gold",@"Ocean · cobalt / teal / mint",@"Single colour",@"Custom palette"]];
+    NSInteger selected=[[NSUserDefaults standardUserDefaults] objectForKey:@"MusicPaletteIndex"]?[[NSUserDefaults standardUserDefaults] integerForKey:@"MusicPaletteIndex"]:1; [self.paletteMenu selectItemAtIndex:MAX(0,MIN(7,selected))]; self.paletteMenu.target=self; self.paletteMenu.action=@selector(paletteChanged:); self.paletteMenu.accessibilityLabel=@"Music colour palette"; [self.popover.contentViewController.view addSubview:self.paletteMenu];
+    [self button:@"Edit colours…" action:@selector(editPalette:) x:292 y:230 width:114];
     self.audioButton=[self button:@"Start music sync" action:@selector(toggleAudio:) x:34 y:195 width:372]; self.audioButton.bezelColor=[NSColor colorWithSRGBRed:0.46 green:0.3 blue:0.85 alpha:1]; [self.lightControls addObject:self.audioButton];
     [self heading:@"BASS" x:36 y:166]; [self heading:@"MID" x:162 y:166]; [self heading:@"TREBLE" x:288 y:166];
     self.bassMeter=[self meterAtX:36 y:152 width:110 color:NSColor.systemOrangeColor label:@"Bass energy"];
@@ -112,6 +125,38 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     NSArray *keys=[[effects allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){ return [@([a intValue]) compare:@([b intValue])]; }];
     for(NSString *key in keys) { [self.modes addItemWithTitle:effects[key]]; self.modes.lastItem.tag=key.integerValue; }
     self.speed=[NSSlider sliderWithValue:50 minValue:0 maxValue:100 target:self action:@selector(speedChanged:)]; self.speed.continuous=NO;
+}
+- (NSColor *)colorFromHex:(NSString *)hex {
+    unsigned value=0; if(hex.length!=6 || ![[NSScanner scannerWithString:hex] scanHexInt:&value]) value=0x9B5CFF;
+    return [NSColor colorWithSRGBRed:((value>>16)&255)/255.0 green:((value>>8)&255)/255.0 blue:(value&255)/255.0 alpha:1];
+}
+- (NSArray<NSColor *> *)musicPalette {
+    NSInteger index=self.paletteMenu.indexOfSelectedItem;
+    if(index==7) return self.customPalette;
+    if(index==6) return @[self.color.color,self.color.color,self.color.color];
+    if(index<=0) return @[];
+    NSMutableArray *colors=[NSMutableArray new]; for(NSString *hex in self.paletteHex[index]) [colors addObject:[self colorFromHex:hex]]; return colors;
+}
+- (void)paletteChanged:(id)sender {
+    [[NSUserDefaults standardUserDefaults] setInteger:self.paletteMenu.indexOfSelectedItem forKey:@"MusicPaletteIndex"];
+    NSArray *colors=[self musicPalette];
+    for(NSInteger i=0;i<3;i++) if(self.paletteWells.count==3) self.paletteWells[i].color=colors.count==3?colors[i]:self.customPalette[i];
+    self.blendedPalette=nil;
+}
+- (void)customPaletteChanged:(id)sender {
+    NSMutableArray *colors=[NSMutableArray new], *hex=[NSMutableArray new];
+    for(NSColorWell *well in self.paletteWells) { NSColor *c=[well.color colorUsingColorSpace:NSColorSpace.sRGBColorSpace]; [colors addObject:c]; [hex addObject:[NSString stringWithFormat:@"%02X%02X%02X",(int)lround(c.redComponent*255),(int)lround(c.greenComponent*255),(int)lround(c.blueComponent*255)]]; }
+    self.customPalette=colors; [[NSUserDefaults standardUserDefaults] setObject:hex forKey:@"CustomMusicPalette"]; [self.paletteMenu selectItemAtIndex:7]; [self paletteChanged:nil];
+}
+- (void)editPalette:(id)sender {
+    if(!self.palettePanel) {
+        self.palettePanel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,400,200) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable backing:NSBackingStoreBuffered defer:NO]; self.palettePanel.contentView=[[MusicLabCanvas alloc] initWithFrame:NSMakeRect(0,0,400,200)]; self.palettePanel.title=@"Music colours"; self.palettePanel.releasedWhenClosed=NO; self.palettePanel.hidesOnDeactivate=NO; self.palettePanel.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+        NSArray *names=@[@"Bass",@"Mids",@"Treble"]; NSMutableArray *wells=[NSMutableArray new];
+        for(int i=0;i<3;i++) { NSTextField *label=[NSTextField labelWithString:names[i]]; label.frame=NSMakeRect(28+i*124,145,100,24); [self.palettePanel.contentView addSubview:label]; NSColorWell *well=[[NSColorWell alloc] initWithFrame:NSMakeRect(28+i*124,85,96,52)]; well.target=self; well.action=@selector(customPaletteChanged:); well.accessibilityLabel=[names[i] stringByAppendingString:@" music colour"]; [self.palettePanel.contentView addSubview:well]; [wells addObject:well]; }
+        self.paletteWells=wells;
+        NSTextField *hint=[NSTextField wrappingLabelWithString:@"Choose three colours. Changes apply live to both music reactions and are saved on this Mac."]; hint.font=[NSFont systemFontOfSize:11]; hint.textColor=NSColor.secondaryLabelColor; hint.frame=NSMakeRect(28,23,344,42); [self.palettePanel.contentView addSubview:hint]; [self.palettePanel center];
+    }
+    [self paletteChanged:nil]; [self.palettePanel makeKeyAndOrderFront:nil];
 }
 - (void)toggleExperimental:(id)sender {
     self.musicEngine=(MusicEngine){0}; [self.spectrogram clear];
@@ -153,11 +198,12 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     self.panel.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     self.panel.titlebarAppearsTransparent=YES; self.panel.backgroundColor=[NSColor colorWithSRGBRed:0.055 green:0.065 blue:0.085 alpha:1];
     self.panel.contentViewController=self.popover.contentViewController;
-    if([NSProcessInfo.processInfo.arguments containsObject:@"--preview"] || [NSProcessInfo.processInfo.arguments containsObject:@"--preview-experiment"]) {
+    if([NSProcessInfo.processInfo.arguments containsObject:@"--preview"] || [NSProcessInfo.processInfo.arguments containsObject:@"--preview-experiment"] || [NSProcessInfo.processInfo.arguments containsObject:@"--preview-palette"]) {
         self.status.stringValue=@"Ready to connect";
         [self.panel.contentView layoutSubtreeIfNeeded];
         NSView *view=self.popover.contentViewController.view;
         if([NSProcessInfo.processInfo.arguments containsObject:@"--preview-experiment"]) { [self showExperiment:nil]; view=self.experimentPanel.contentView; }
+        if([NSProcessInfo.processInfo.arguments containsObject:@"--preview-palette"]) { [self editPalette:nil]; view=self.palettePanel.contentView; }
         NSBitmapImageRep *rep=[view bitmapImageRepForCachingDisplayInRect:view.bounds];
         [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
         [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"/private/tmp/LightBar-preview.png" atomically:YES];
@@ -251,7 +297,9 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 - (void)power:(NSButton *)b { [self stopAudioRestoring:YES]; BOOL on=[b.title isEqualToString:@"Turn on"]; [self send:Power(on)]; b.title=on?@"Turn off":@"Turn on"; }
 - (void)colour:(id)sender {
     NSColor *c=[self.color.color colorUsingColorSpace:[NSColorSpace sRGBColorSpace]]; if(!c) return;
+    [[NSUserDefaults standardUserDefaults] setObject:[NSString stringWithFormat:@"%02X%02X%02X",(int)lround(c.redComponent*255),(int)lround(c.greenComponent*255),(int)lround(c.blueComponent*255)] forKey:@"StaticLightColor"];
     self.preview.lightColor=c; self.preview.needsDisplay=YES;
+    if(self.audioRequested) { [self.paletteMenu selectItemAtIndex:6]; [self paletteChanged:nil]; }
     if(!self.audioRequested) [self send:RGB(lround(c.redComponent*255),lround(c.greenComponent*255),lround(c.blueComponent*255))]; [self.modes selectItemAtIndex:0];
 }
 - (void)preset:(NSButton *)b {
@@ -266,7 +314,7 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 - (void)toggleAudio:(id)sender {
     if(self.audioRequested) { [self stopAudioRestoring:YES]; return; }
     if(!self.writer) return;
-    self.musicEngine=(MusicEngine){0}; [self.spectrogram clear]; self.audioRequested=YES; self.audioStarted=NO; NSUInteger generation=++self.audioGeneration;
+    self.blendedPalette=nil; self.musicEngine=(MusicEngine){0}; [self.spectrogram clear]; self.audioRequested=YES; self.audioStarted=NO; NSUInteger generation=++self.audioGeneration;
     self.audioButton.title=@"Cancel audio setup"; [self showStatus:@"Allow macOS recording permission to react to audio"];
     self.audio=[AudioCapture new]; __weak LightBar *weakSelf=self;
     self.audio.onLevel=^(double rms){ LightBar *owner=weakSelf; if(!owner.audioRequested) return; owner.audioPeak=MAX(owner.audioPeak,rms); owner.lastAudioSample=NSProcessInfo.processInfo.systemUptime; };
@@ -318,6 +366,14 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
         c=[NSColor colorWithSRGBRed:output.r green:output.g blue:output.b alpha:1]; self.audioEnvelope=output.intensity;
         self.tempoLabel.stringValue=output.confidence>0.35?[NSString stringWithFormat:@"≈ %.0f BPM",output.bpm]:@"Listening for a beat…";
         self.confidenceLabel.stringValue=output.confidence>0.35?[NSString stringWithFormat:@"%.0f%% rhythm confidence · colour follows song energy",output.confidence*100]:@"Following the spectrum while the beat estimate settles.";
+    }
+    NSArray *palette=[self musicPalette];
+    if(palette.count==3) {
+        double weights[3]={bass*(1-MAX(0,pan)*0.2),mid,high*(1+pan*0.2)};
+        double total=MAX(0.001,weights[0]+weights[1]+weights[2]),r=0,g=0,b=0;
+        for(int i=0;i<3;i++){ NSColor *p=[palette[i] colorUsingColorSpace:NSColorSpace.sRGBColorSpace]; r+=p.redComponent*weights[i]/total; g+=p.greenComponent*weights[i]/total; b+=p.blueComponent*weights[i]/total; }
+        NSColor *target=[NSColor colorWithSRGBRed:MIN(1,r) green:MIN(1,g) blue:MIN(1,b) alpha:1];
+        self.blendedPalette=self.blendedPalette?[self.blendedPalette blendedColorWithFraction:(self.experimentalSwitch.state==NSControlStateValueOn?0.16:0.35) ofColor:target]:target; c=self.blendedPalette;
     }
     self.preview.lightColor=c; self.preview.intensity=self.audioEnvelope; self.preview.needsDisplay=YES;
     if(self.pending.count||!self.light.canSendWriteWithoutResponse) return;

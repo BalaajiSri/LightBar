@@ -76,3 +76,20 @@ Tempo estimation uses positive changes in bass/treble energy, resampled to 50 Hz
 Syncopation, tempo changes, weak drums, and half/double-time beats can give an incorrect estimate. There is no isolated-vocal recognition, exact beat-grid guarantee, or real-song accuracy claim. Synthetic 90/120/150 BPM tests, missing-beat recovery, spectrum localisation, silence, and bounded-output checks pass; live songs and physical light response still require user testing.
 
 ![Experimental music lab, before audio starts](Docs/experiment.png)
+
+## Choose your music colours (0.4.1)
+
+Use the palette menu under **Music, in colour** in either the classic or experimental reaction:
+
+- **Neon**: pink, violet, cyan (default).
+- **Sunset**: coral, rose, violet.
+- **Aurora**: mint, sky blue, lilac.
+- **Ember**: red, amber, gold.
+- **Ocean**: cobalt, teal, mint.
+- **Single colour**: use the main colour picker, with music controlling intensity.
+- **Custom palette**: click **Edit colours…** and choose bass, mids and treble colours.
+- **Original spectrum**: use the original renderer's colours.
+
+Palette changes apply during music playback without restarting capture. Colours blend according to relative frequency energy; experimental mode blends more gradually. The chosen palette and custom colours are stored locally and restored on the next launch. The bar still shows one mixed colour at a time. The app's audio-capture implementation is unchanged in this update.
+
+![Custom music colours](Docs/palettes.png)
