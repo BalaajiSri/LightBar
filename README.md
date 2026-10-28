@@ -64,3 +64,15 @@ Diagnostic connection and command events are written locally to `LightBar.log` i
 ## App design
 
 The app has a custom macOS icon, a persistent control panel, and a menu bar shortcut. The screenshot above is a rendered disconnected-state preview, not evidence of a connected light. The new combined effect has automated protocol and signal-analysis coverage; visible behaviour on individual controllers still needs user testing.
+
+## Experimental BPM and spectrum lab (0.4 prerelease)
+
+Start music sync, then enable **Experimental BPM**. This optional addition starts **off** each time the app opens; leave it off for the existing music reaction. **Live view** opens a separate panel with estimated tempo and a scrolling, 16-band frequency history (bass at the bottom, treble at the top, newest sound at the right).
+
+The experimental renderer blends warm bass, violet mids, cyan highs and stereo balance. Quiet phrases diffuse slowly through colours; higher sustained energy brings stronger bass accents and estimated-beat pulses. The lamp still receives a single RGB value for the whole bar at up to 10 Hz. The spectrogram is in the app, not independent regions on the physical lamp.
+
+Tempo estimation uses positive changes in bass/treble energy, resampled to 50 Hz, with autocorrelation over up to 12 seconds. It searches approximately 60–180 BPM and needs several seconds of steady rhythm. Rhythm confidence is a heuristic periodicity score, not a calibrated probability. Uncertain rhythm falls back to spectrum/onset response. Silence suppresses intensity and stale rhythm confidence. Genre targets for the first trial are hip-hop, EDM, pop, and hyperpop; this is not a genre classifier.
+
+Syncopation, tempo changes, weak drums, and half/double-time beats can give an incorrect estimate. There is no isolated-vocal recognition, exact beat-grid guarantee, or real-song accuracy claim. Synthetic 90/120/150 BPM tests, missing-beat recovery, spectrum localisation, silence, and bounded-output checks pass; live songs and physical light response still require user testing.
+
+![Experimental music lab, before audio starts](Docs/experiment.png)

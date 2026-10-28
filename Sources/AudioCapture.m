@@ -3,11 +3,13 @@
 #import <CoreMedia/CoreMedia.h>
 #import <AudioToolbox/AudioToolbox.h>
 
+typedef struct { float samples[MUSIC_FFT], right[MUSIC_FFT]; int used; } SpectrumBuffer;
 @interface AudioCapture ()
 @property(nonatomic, strong) SCStream *stream;
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) BOOL running;
 @property(nonatomic) BandFilter filter;
+@property(nonatomic) SpectrumBuffer spectrumBuffer;
 @end
 @implementation AudioCapture
 - (void)fail:(NSString *)message {
@@ -42,7 +44,7 @@
     }];
 }
 - (void)stop {
-    self.running=NO; self.generation++; self.filter=(BandFilter){0};
+    self.running=NO; self.generation++; self.filter=(BandFilter){0}; self.spectrumBuffer=(SpectrumBuffer){0};
     SCStream *stream=self.stream; self.stream=nil;
     if(stream) [stream stopCaptureWithCompletionHandler:^(NSError *error){}];
 }
@@ -80,6 +82,20 @@
             if(l&&r) {
                 const float *p=first.mData, *q=(planar&&list->mNumberBuffers>1)?list->mBuffers[1].mData:NULL;
                 for(size_t i=0;i<frames;i++) { l[i]=p[planar?i:i*format->mChannelsPerFrame]; r[i]=q?q[i]:(!planar&&format->mChannelsPerFrame>1?p[i*format->mChannelsPerFrame+1]:l[i]); }
+                if(self.onSpectrum) {
+                    SpectrumBuffer buffer=self.spectrumBuffer;
+                    for(size_t i=0;i<frames;i++) {
+                        buffer.samples[buffer.used]=l[i]; buffer.right[buffer.used++]=r[i];
+                        if(buffer.used==MUSIC_FFT) {
+                            float values[MUSIC_BINS], rightValues[MUSIC_BINS]; MusicSpectrum(buffer.samples,format->mSampleRate,values); MusicSpectrum(buffer.right,format->mSampleRate,rightValues);
+                            for(int b=0;b<MUSIC_BINS;b++) values[b]=sqrtf((values[b]*values[b]+rightValues[b]*rightValues[b])*0.5f);
+                            NSMutableArray *bins=[NSMutableArray arrayWithCapacity:MUSIC_BINS];
+                            for(int b=0;b<MUSIC_BINS;b++) [bins addObject:@(values[b])];
+                            self.onSpectrum(bins); buffer.used=0;
+                        }
+                    }
+                    self.spectrumBuffer=buffer;
+                }
                 BandFilter f=self.filter; AudioBands bands=AnalyzeAudio(&f,l,r,frames,format->mSampleRate); self.filter=f; self.onBands(bands);
             }
             free(l); free(r);

@@ -44,6 +44,11 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 @property AudioBands bands;
 @property BOOL audioRequested, audioStarted;
 @property NSUInteger audioGeneration;
+@property MusicEngine musicEngine;
+@property (strong) NSButton *experimentalSwitch;
+@property (strong) NSPanel *experimentPanel;
+@property (strong) NSTextField *tempoLabel, *confidenceLabel;
+@property (strong) MusicSpectrogram *spectrogram;
 @end
 
 @implementation LightBar
@@ -96,7 +101,8 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     self.trebleMeter=[self meterAtX:288 y:152 width:110 color:NSColor.systemTealColor label:@"Treble energy"];
     NSTextField *sensitivity=[self label:@"Sensitivity" x:36 y:115 width:95]; sensitivity.font=[NSFont systemFontOfSize:12];
     self.sensitivity=[NSSlider sliderWithValue:2 minValue:0.5 maxValue:8 target:nil action:nil]; self.sensitivity.frame=NSMakeRect(139,115,263,22); self.sensitivity.accessibilityLabel=@"Audio sensitivity"; [self.popover.contentViewController.view addSubview:self.sensitivity];
-    NSTextField *privacy=[self label:@"Processed on your Mac. No audio is saved." x:36 y:81 width:368]; privacy.font=[NSFont systemFontOfSize:10]; privacy.textColor=NSColor.secondaryLabelColor;
+    self.experimentalSwitch=[NSButton checkboxWithTitle:@"Experimental BPM" target:self action:@selector(toggleExperimental:)]; self.experimentalSwitch.frame=NSMakeRect(36,78,230,24); self.experimentalSwitch.font=[NSFont systemFontOfSize:12]; [self.popover.contentViewController.view addSubview:self.experimentalSwitch];
+    [self button:@"Live view ↗" action:@selector(showExperiment:) x:298 y:77 width:108];
     [self button:@"Animations…" action:@selector(showAnimations:) x:20 y:17 width:110];
     [self button:@"Disconnect" action:@selector(disconnect:) x:140 y:17 width:110];
     [self button:@"Quit LightBar" action:@selector(quit:) x:290 y:17 width:130];
@@ -106,6 +112,24 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     NSArray *keys=[[effects allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){ return [@([a intValue]) compare:@([b intValue])]; }];
     for(NSString *key in keys) { [self.modes addItemWithTitle:effects[key]]; self.modes.lastItem.tag=key.integerValue; }
     self.speed=[NSSlider sliderWithValue:50 minValue:0 maxValue:100 target:self action:@selector(speedChanged:)]; self.speed.continuous=NO;
+}
+- (void)toggleExperimental:(id)sender {
+    self.musicEngine=(MusicEngine){0}; [self.spectrogram clear];
+    self.tempoLabel.stringValue=@"Listening for a beat…"; self.confidenceLabel.stringValue=@"Estimate needs several seconds of steady rhythm.";
+    if(self.experimentalSwitch.state==NSControlStateValueOn) [self showExperiment:nil];
+}
+- (void)showExperiment:(id)sender {
+    if(!self.experimentPanel) {
+        self.experimentPanel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,480,290) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable backing:NSBackingStoreBuffered defer:NO]; self.experimentPanel.releasedWhenClosed=NO; self.experimentPanel.hidesOnDeactivate=NO; self.experimentPanel.title=@"Music lab · Experimental"; self.experimentPanel.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+        self.experimentPanel.contentView=[[MusicLabCanvas alloc] initWithFrame:NSMakeRect(0,0,480,290)];
+        NSView *view=self.experimentPanel.contentView;
+        self.tempoLabel=[NSTextField labelWithString:@"Listening for a beat…"]; self.tempoLabel.font=[NSFont systemFontOfSize:24 weight:NSFontWeightSemibold]; self.tempoLabel.frame=NSMakeRect(24,236,432,34); [view addSubview:self.tempoLabel];
+        self.confidenceLabel=[NSTextField labelWithString:@"Enable Experimental BPM and start music sync."]; self.confidenceLabel.font=[NSFont systemFontOfSize:11]; self.confidenceLabel.textColor=NSColor.secondaryLabelColor; self.confidenceLabel.frame=NSMakeRect(24,207,432,22); [view addSubview:self.confidenceLabel];
+        self.spectrogram=[[MusicSpectrogram alloc] initWithFrame:NSMakeRect(24,63,432,132)]; self.spectrogram.accessibilityLabel=@"Frequency history: bass at bottom, treble at top, newest at right"; [view addSubview:self.spectrogram];
+        NSTextField *legend=[NSTextField labelWithString:@"Bass ↓   Treble ↑                      Newest sound →"]; legend.font=[NSFont systemFontOfSize:10]; legend.textColor=NSColor.secondaryLabelColor; legend.frame=NSMakeRect(24,38,432,20); [view addSubview:legend];
+        NSTextField *note=[NSTextField labelWithString:@"Whole-bar output · tempo can be half or double the song’s beat."]; note.font=[NSFont systemFontOfSize:10]; note.textColor=NSColor.secondaryLabelColor; note.frame=NSMakeRect(24,12,440,20); [view addSubview:note]; [self.experimentPanel center];
+    }
+    [self.experimentPanel makeKeyAndOrderFront:nil];
 }
 - (void)showAnimations:(NSButton *)sender {
     if(!self.writer) return;
@@ -129,10 +153,11 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     self.panel.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     self.panel.titlebarAppearsTransparent=YES; self.panel.backgroundColor=[NSColor colorWithSRGBRed:0.055 green:0.065 blue:0.085 alpha:1];
     self.panel.contentViewController=self.popover.contentViewController;
-    if([NSProcessInfo.processInfo.arguments containsObject:@"--preview"]) {
+    if([NSProcessInfo.processInfo.arguments containsObject:@"--preview"] || [NSProcessInfo.processInfo.arguments containsObject:@"--preview-experiment"]) {
         self.status.stringValue=@"Ready to connect";
         [self.panel.contentView layoutSubtreeIfNeeded];
         NSView *view=self.popover.contentViewController.view;
+        if([NSProcessInfo.processInfo.arguments containsObject:@"--preview-experiment"]) { [self showExperiment:nil]; view=self.experimentPanel.contentView; }
         NSBitmapImageRep *rep=[view bitmapImageRepForCachingDisplayInRect:view.bounds];
         [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
         [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"/private/tmp/LightBar-preview.png" atomically:YES];
@@ -241,11 +266,15 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 - (void)toggleAudio:(id)sender {
     if(self.audioRequested) { [self stopAudioRestoring:YES]; return; }
     if(!self.writer) return;
-    self.audioRequested=YES; self.audioStarted=NO; NSUInteger generation=++self.audioGeneration;
+    self.musicEngine=(MusicEngine){0}; [self.spectrogram clear]; self.audioRequested=YES; self.audioStarted=NO; NSUInteger generation=++self.audioGeneration;
     self.audioButton.title=@"Cancel audio setup"; [self showStatus:@"Allow macOS recording permission to react to audio"];
     self.audio=[AudioCapture new]; __weak LightBar *weakSelf=self;
     self.audio.onLevel=^(double rms){ LightBar *owner=weakSelf; if(!owner.audioRequested) return; owner.audioPeak=MAX(owner.audioPeak,rms); owner.lastAudioSample=NSProcessInfo.processInfo.systemUptime; };
-    self.audio.onBands=^(AudioBands bands){ LightBar *owner=weakSelf; if(owner.audioRequested) owner.bands=bands; };
+    self.audio.onBands=^(AudioBands bands){
+        LightBar *owner=weakSelf; if(!owner.audioRequested) return; owner.bands=bands;
+        if(owner.experimentalSwitch.state==NSControlStateValueOn) { MusicEngine engine=owner.musicEngine; double gain=owner.sensitivity.doubleValue; MusicFeed(&engine,NSProcessInfo.processInfo.systemUptime,AudioTarget(bands.bass,gain),AudioTarget(bands.mid,gain),AudioTarget(bands.treble,gain)); owner.musicEngine=engine; }
+    };
+    self.audio.onSpectrum=^(NSArray<NSNumber *> *bins){ LightBar *owner=weakSelf; if(owner.audioRequested && owner.experimentalSwitch.state==NSControlStateValueOn) [owner.spectrogram appendSpectrum:bins]; };
     self.audio.onStarted=^{
         LightBar *owner=weakSelf; if(!owner||!owner.audioRequested||generation!=owner.audioGeneration) return;
         owner.audioStarted=YES; owner.audioButton.title=@"Stop music sync";
@@ -284,6 +313,12 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     double blue=mid*0.85+high+MAX(0,pan)*0.15*level;
     double peak=MAX(0.001,MAX(red,MAX(green,blue)));
     NSColor *c=[NSColor colorWithSRGBRed:MIN(1,red/peak) green:MIN(1,green/peak) blue:MIN(1,blue/peak) alpha:1];
+    if(self.experimentalSwitch.state==NSControlStateValueOn) {
+        MusicEngine engine=self.musicEngine; MusicOutput output=MusicRender(&engine,now,bass,mid,high,level,pan); self.musicEngine=engine;
+        c=[NSColor colorWithSRGBRed:output.r green:output.g blue:output.b alpha:1]; self.audioEnvelope=output.intensity;
+        self.tempoLabel.stringValue=output.confidence>0.35?[NSString stringWithFormat:@"≈ %.0f BPM",output.bpm]:@"Listening for a beat…";
+        self.confidenceLabel.stringValue=output.confidence>0.35?[NSString stringWithFormat:@"%.0f%% rhythm confidence · colour follows song energy",output.confidence*100]:@"Following the spectrum while the beat estimate settles.";
+    }
     self.preview.lightColor=c; self.preview.intensity=self.audioEnvelope; self.preview.needsDisplay=YES;
     if(self.pending.count||!self.light.canSendWriteWithoutResponse) return;
     c=[c colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
@@ -294,6 +329,7 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     if(!self.audioRequested && !self.audio) return;
     BOOL started=self.audioStarted; self.audioRequested=NO; self.audioStarted=NO; self.audioGeneration++;
     [self.audioTimer invalidate]; self.audioTimer=nil; [self.audio stop]; self.audio=nil;
+    self.musicEngine=(MusicEngine){0}; [self.spectrogram clear]; self.tempoLabel.stringValue=@"Music sync stopped"; self.confidenceLabel.stringValue=@"Start music sync to estimate the beat.";
     self.bands=(AudioBands){0}; self.audioPeak=0; self.audioEnvelope=0; self.averageLevel=0; self.beatGlow=0; self.lastBeat=0; self.bassMeter.doubleValue=0; self.midMeter.doubleValue=0; self.trebleMeter.doubleValue=0; self.audioButton.title=@"Start music sync";
     if(restore && started && self.writer && self.light.state==CBPeripheralStateConnected) {
         [self.pending removeAllObjects];
@@ -330,6 +366,7 @@ int main(int argc,const char *argv[]) {
             ok=ok && lowBands.bass>lowBands.treble*3 && highBands.treble>highBands.bass*3 && lowBands.left>0.3 && lowBands.right<0.001;
             printf("Frequency and stereo checks: %s\n",ok?"PASS":"FAIL");
             printf("Audio level, silence, sensitivity, and decay checks: %s\n",ok?"PASS":"FAIL");
+            ok=MusicEngineTests() && ok;
             printf("Protocol frame checks: %s\n",ok?"PASS":"FAIL"); return ok?0:1;
         }
         NSApplication *app=[NSApplication sharedApplication]; [app setActivationPolicy:NSApplicationActivationPolicyAccessory];
