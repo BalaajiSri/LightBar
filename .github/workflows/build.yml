@@ -1,0 +1,22 @@
+name: Build macOS app
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal app and run checks
+        run: zsh build.sh
+      - name: Check architectures
+        run: lipo build/LightBar.app/Contents/MacOS/LightBar -verify_arch arm64 x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LightBar-macOS-universal
+          path: LightBar.zip
