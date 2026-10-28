@@ -2,6 +2,7 @@
 #import <CoreBluetooth/CoreBluetooth.h>
 #import "AudioCapture.h"
 #import "AudioMath.h"
+#import "Appearance.h"
 
 static NSData *Frame(uint8_t len,uint8_t op,uint8_t a,uint8_t b,uint8_t c,uint8_t d,uint8_t e) {
     uint8_t bytes[]={0x7e,len,op,a,b,c,d,e,0xef}; return [NSData dataWithBytes:bytes length:9];
@@ -35,7 +36,8 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 @property (strong) NSButton *audioButton;
 @property (strong) NSLevelIndicator *audioMeter;
 @property (strong) NSSlider *sensitivity;
-@property (strong) NSPopUpButton *musicStyle;
+@property (strong) NSLevelIndicator *bassMeter, *midMeter, *trebleMeter;
+@property (strong) LightPreview *preview;
 @property double averageLevel, beatGlow, musicHue, lastBeat;
 @property (strong) NSTimer *audioTimer;
 @property double audioPeak, audioEnvelope, lastAudioSample;
@@ -58,6 +60,61 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 - (NSButton *)button:(NSString *)title action:(SEL)action x:(CGFloat)x y:(CGFloat)y width:(CGFloat)w {
     NSButton *b=[NSButton buttonWithTitle:title target:self action:action]; b.frame=NSMakeRect(x,y,w,28); [self.popover.contentViewController.view addSubview:b]; return b;
 }
+- (void)heading:(NSString *)title x:(CGFloat)x y:(CGFloat)y {
+    NSTextField *v=[self label:title x:x y:y width:300]; v.font=[NSFont systemFontOfSize:10 weight:NSFontWeightSemibold]; v.textColor=[NSColor colorWithWhite:0.65 alpha:1];
+}
+- (NSLevelIndicator *)meterAtX:(CGFloat)x y:(CGFloat)y width:(CGFloat)width color:(NSColor *)color label:(NSString *)label {
+    NSLevelIndicator *m=[[NSLevelIndicator alloc] initWithFrame:NSMakeRect(x,y,width,8)]; m.levelIndicatorStyle=NSLevelIndicatorStyleContinuousCapacity; m.minValue=0; m.maxValue=1; m.warningValue=1; m.criticalValue=1; m.fillColor=color; m.accessibilityLabel=label;
+    [self.popover.contentViewController.view addSubview:m]; return m;
+}
+- (void)buildInterface {
+    self.popover=[NSPopover new]; self.popover.contentViewController=[NSViewController new];
+    self.popover.contentViewController.view=[[LightCanvas alloc] initWithFrame:NSMakeRect(0,0,440,732)];
+    self.popover.contentViewController.view.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    NSTextField *title=[self label:@"LightBar" x:24 y:679 width:250]; title.font=[NSFont systemFontOfSize:30 weight:NSFontWeightBold]; title.frame=NSMakeRect(24,677,250,40);
+    NSTextField *tagline=[self label:@"A little light. A lot of atmosphere." x:26 y:654 width:380]; tagline.font=[NSFont systemFontOfSize:12]; tagline.textColor=NSColor.secondaryLabelColor;
+    [self heading:@"YOUR LIGHT" x:36 y:609];
+    self.status=[self label:@"Starting Bluetooth…" x:36 y:585 width:368]; self.status.font=[NSFont systemFontOfSize:11]; self.status.lineBreakMode=NSLineBreakByTruncatingTail; self.status.textColor=[NSColor colorWithSRGBRed:0.57 green:0.8 blue:0.79 alpha:1];
+    self.deviceList=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(34,547,220,30) pullsDown:NO]; [self.deviceList addItemWithTitle:@"Find your light"]; [self.popover.contentViewController.view addSubview:self.deviceList];
+    [self button:@"Scan" action:@selector(scan:) x:259 y:548 width:64];
+    self.connectButton=[self button:@"Connect" action:@selector(connect:) x:326 y:548 width:80];
+    [self heading:@"MAKE IT YOURS" x:36 y:478];
+    self.powerButton=[self button:@"Turn on" action:@selector(power:) x:314 y:476 width:90]; [self.lightControls addObject:self.powerButton];
+    self.preview=[[LightPreview alloc] initWithFrame:NSMakeRect(32,433,376,34)]; self.preview.intensity=0.5; self.preview.toolTip=@"Colour preview · whole bar output"; [self.popover.contentViewController.view addSubview:self.preview];
+    NSArray *colors=@[[NSColor colorWithSRGBRed:1 green:0.15 blue:0.2 alpha:1],NSColor.orangeColor,NSColor.systemGreenColor,NSColor.systemBlueColor,NSColor.systemPurpleColor,NSColor.whiteColor];
+    NSArray *names=@[@"Red",@"Amber",@"Green",@"Blue",@"Purple",@"White"];
+    for(NSInteger i=0;i<6;i++){ NSButton *b=[self button:@"●" action:@selector(preset:) x:34+i*48 y:400 width:40]; b.tag=i; b.font=[NSFont systemFontOfSize:23]; b.bordered=NO; b.contentTintColor=colors[i]; b.accessibilityLabel=names[i]; b.toolTip=names[i]; [self.lightControls addObject:b]; }
+    self.color=[[NSColorWell alloc] initWithFrame:NSMakeRect(356,400,46,28)]; self.color.color=[NSColor orangeColor]; self.color.target=self; self.color.action=@selector(colour:); self.color.accessibilityLabel=@"Custom light colour"; [self.popover.contentViewController.view addSubview:self.color]; [self.lightControls addObject:self.color]; self.preview.lightColor=self.color.color;
+    self.brightnessLabel=[self label:@"Brightness · 70%" x:36 y:370 width:240]; self.brightnessLabel.font=[NSFont systemFontOfSize:12];
+    self.brightness=[NSSlider sliderWithValue:70 minValue:0 maxValue:100 target:self action:@selector(brightnessChanged:)]; self.brightness.frame=NSMakeRect(36,343,366,22); self.brightness.continuous=NO; self.brightness.accessibilityLabel=@"Brightness"; [self.popover.contentViewController.view addSubview:self.brightness]; [self.lightControls addObject:self.brightness];
+    [self heading:@"MUSIC, IN COLOUR" x:36 y:257];
+    NSTextField *description=[self label:@"Bass, beats and stereo. One adaptive mix." x:36 y:235 width:370]; description.font=[NSFont systemFontOfSize:12]; description.textColor=NSColor.secondaryLabelColor;
+    self.audioButton=[self button:@"Start music sync" action:@selector(toggleAudio:) x:34 y:195 width:372]; self.audioButton.bezelColor=[NSColor colorWithSRGBRed:0.46 green:0.3 blue:0.85 alpha:1]; [self.lightControls addObject:self.audioButton];
+    [self heading:@"BASS" x:36 y:166]; [self heading:@"MID" x:162 y:166]; [self heading:@"TREBLE" x:288 y:166];
+    self.bassMeter=[self meterAtX:36 y:152 width:110 color:NSColor.systemOrangeColor label:@"Bass energy"];
+    self.midMeter=[self meterAtX:162 y:152 width:110 color:NSColor.systemPurpleColor label:@"Middle frequency energy"];
+    self.trebleMeter=[self meterAtX:288 y:152 width:110 color:NSColor.systemTealColor label:@"Treble energy"];
+    NSTextField *sensitivity=[self label:@"Sensitivity" x:36 y:115 width:95]; sensitivity.font=[NSFont systemFontOfSize:12];
+    self.sensitivity=[NSSlider sliderWithValue:2 minValue:0.5 maxValue:8 target:nil action:nil]; self.sensitivity.frame=NSMakeRect(139,115,263,22); self.sensitivity.accessibilityLabel=@"Audio sensitivity"; [self.popover.contentViewController.view addSubview:self.sensitivity];
+    NSTextField *privacy=[self label:@"Processed on your Mac. No audio is saved." x:36 y:81 width:368]; privacy.font=[NSFont systemFontOfSize:10]; privacy.textColor=NSColor.secondaryLabelColor;
+    [self button:@"Animations…" action:@selector(showAnimations:) x:20 y:17 width:110];
+    [self button:@"Disconnect" action:@selector(disconnect:) x:140 y:17 width:110];
+    [self button:@"Quit LightBar" action:@selector(quit:) x:290 y:17 width:130];
+    // Keep animations in a separate native menu to give the main panel breathing room.
+    self.modes=[[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO]; [self.modes addItemWithTitle:@"Choose an effect…"]; self.modes.lastItem.tag=-1;
+    NSDictionary *effects=self.effects[@"ANIMATION_MODES"];
+    NSArray *keys=[[effects allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){ return [@([a intValue]) compare:@([b intValue])]; }];
+    for(NSString *key in keys) { [self.modes addItemWithTitle:effects[key]]; self.modes.lastItem.tag=key.integerValue; }
+    self.speed=[NSSlider sliderWithValue:50 minValue:0 maxValue:100 target:self action:@selector(speedChanged:)]; self.speed.continuous=NO;
+}
+- (void)showAnimations:(NSButton *)sender {
+    if(!self.writer) return;
+    NSMenu *menu=[[NSMenu alloc] initWithTitle:@"Animations"];
+    for(NSMenuItem *item in self.modes.itemArray) { if(item.tag<0) continue; NSMenuItem *copy=[[NSMenuItem alloc] initWithTitle:item.title action:@selector(selectAnimation:) keyEquivalent:@""]; copy.tag=item.tag; copy.target=self; [menu addItem:copy]; }
+    NSMenuItem *speed=[NSMenuItem new]; NSView *view=[[NSView alloc] initWithFrame:NSMakeRect(0,0,260,42)]; self.speed.frame=NSMakeRect(16,8,228,22); self.speed.accessibilityLabel=@"Animation speed"; [view addSubview:self.speed]; speed.view=view; [menu insertItem:speed atIndex:0];
+    [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0,32) inView:sender];
+}
+- (void)selectAnimation:(NSMenuItem *)item { [self.modes selectItemWithTag:item.tag]; [self modeChanged:self.modes]; }
 - (void)applicationDidFinishLaunching:(NSNotification *)note {
     self.reconnect=YES; self.devices=[NSMutableArray new]; self.lightControls=[NSMutableArray new]; self.pending=[NSMutableArray new];
     NSURL *url=[[NSBundle mainBundle] URLForResource:@"Effects" withExtension:@"json"];
@@ -65,53 +122,23 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     self.item=[[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
     self.item.autosaveName=@"LightBarMenu"; self.item.button.title=@"💡"; self.item.button.accessibilityLabel=@"LightBar";
     self.item.button.target=self; self.item.button.action=@selector(togglePanel:); self.item.button.toolTip=@"LightBar";
-    self.popover=[NSPopover new]; self.popover.behavior=NSPopoverBehaviorTransient;
-    self.popover.contentSize=NSMakeSize(340,670); self.popover.contentViewController=[NSViewController new];
-    self.popover.contentViewController.view=[[NSView alloc] initWithFrame:NSMakeRect(0,0,340,670)];
-    NSTextField *title=[self label:@"LightBar" x:20 y:477 width:220]; title.font=[NSFont boldSystemFontOfSize:21];
-    self.status=[self label:@"Starting Bluetooth…" x:20 y:446 width:300]; self.status.font=[NSFont systemFontOfSize:11]; self.status.lineBreakMode=NSLineBreakByTruncatingTail;
-    self.deviceList=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(18,407,220,30) pullsDown:NO]; [self.deviceList addItemWithTitle:@"Scan for your light"]; [self.popover.contentViewController.view addSubview:self.deviceList];
-    [self button:@"Scan" action:@selector(scan:) x:242 y:408 width:78];
-    self.connectButton=[self button:@"Connect" action:@selector(connect:) x:20 y:372 width:144];
-    self.powerButton=[self button:@"Turn on" action:@selector(power:) x:176 y:372 width:144]; [self.lightControls addObject:self.powerButton];
-    [self label:@"COLOUR" x:20 y:335 width:150].font=[NSFont systemFontOfSize:10 weight:NSFontWeightSemibold];
-    NSArray *names=@[@"Red",@"Amber",@"Green",@"Blue",@"Purple",@"White"];
-    NSArray *colors=@[[NSColor systemRedColor],[NSColor orangeColor],[NSColor systemGreenColor],[NSColor systemBlueColor],[NSColor systemPurpleColor],[NSColor whiteColor]];
-    for (NSInteger i=0;i<6;i++) { NSButton *b=[self button:@"●" action:@selector(preset:) x:18+i*43 y:300 width:40]; b.tag=i; b.contentTintColor=colors[i]; b.toolTip=names[i]; b.accessibilityLabel=names[i]; [self.lightControls addObject:b]; }
-    self.color=[[NSColorWell alloc] initWithFrame:NSMakeRect(282,299,38,29)]; self.color.color=[NSColor orangeColor]; self.color.target=self; self.color.action=@selector(colour:); [self.popover.contentViewController.view addSubview:self.color]; [self.lightControls addObject:self.color];
-    self.brightnessLabel=[self label:@"Brightness · 70%" x:20 y:263 width:300];
-    self.brightness=[NSSlider sliderWithValue:70 minValue:0 maxValue:100 target:self action:@selector(brightnessChanged:)]; self.brightness.frame=NSMakeRect(20,237,300,22); self.brightness.continuous=NO; [self.popover.contentViewController.view addSubview:self.brightness]; [self.lightControls addObject:self.brightness];
-    [self label:@"MODE" x:20 y:202 width:150].font=[NSFont systemFontOfSize:10 weight:NSFontWeightSemibold];
-    self.modes=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(18,169,304,30) pullsDown:NO];
-    [self.modes addItemWithTitle:@"Choose an effect…"]; self.modes.lastItem.tag=-1;
-    NSDictionary *m=self.effects[@"ANIMATION_MODES"];
-    NSArray *keys=[[m allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){ return [@([a intValue]) compare:@([b intValue])]; }];
-    for (NSString *key in keys) { [self.modes addItemWithTitle:m[key]]; self.modes.lastItem.tag=key.integerValue; }
-    self.modes.target=self; self.modes.action=@selector(modeChanged:); [self.popover.contentViewController.view addSubview:self.modes]; [self.lightControls addObject:self.modes];
-    [self label:@"Effect speed" x:20 y:137 width:300];
-    self.speed=[NSSlider sliderWithValue:50 minValue:0 maxValue:100 target:self action:@selector(speedChanged:)]; self.speed.frame=NSMakeRect(20,111,300,22); self.speed.continuous=NO; [self.popover.contentViewController.view addSubview:self.speed]; [self.lightControls addObject:self.speed];
-    NSTextField *hint=[self label:@"Controls show your last commands, not live light state." x:20 y:77 width:300]; hint.font=[NSFont systemFontOfSize:10]; hint.textColor=[NSColor secondaryLabelColor];
-    for(NSView *view in self.popover.contentViewController.view.subviews) { NSRect frame=view.frame; frame.origin.y+=110; view.frame=frame; }
-    self.audioButton=[self button:@"React to Mac audio" action:@selector(toggleAudio:) x:20 y:145 width:300];
-    [self.lightControls addObject:self.audioButton];
-    self.audioMeter=[[NSLevelIndicator alloc] initWithFrame:NSMakeRect(22,123,296,12)];
-    self.audioMeter.levelIndicatorStyle=NSLevelIndicatorStyleContinuousCapacity; self.audioMeter.minValue=0; self.audioMeter.maxValue=1; self.audioMeter.warningValue=0.8; self.audioMeter.criticalValue=0.95;
-    self.audioMeter.accessibilityLabel=@"Computer audio level"; [self.popover.contentViewController.view addSubview:self.audioMeter];
-    [self label:@"Audio sensitivity" x:20 y:94 width:300];
-    self.sensitivity=[NSSlider sliderWithValue:2 minValue:0.5 maxValue:8 target:nil action:nil]; self.sensitivity.frame=NSMakeRect(20,68,300,22); self.sensitivity.accessibilityLabel=@"Audio sensitivity";
-    [self.popover.contentViewController.view addSubview:self.sensitivity];
-    for(NSView *view in self.popover.contentViewController.view.subviews) { if(view.frame.origin.y>=123) { NSRect frame=view.frame; frame.origin.y+=40; view.frame=frame; } }
-    self.musicStyle=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(18,130,304,28) pullsDown:NO];
-    [self.musicStyle addItemsWithTitles:@[@"Beat pulse", @"Smooth glow", @"Colour flow", @"Bass pulse", @"Voice-range glow", @"Spectrum colour", @"Stereo colour"]];
-    self.musicStyle.accessibilityLabel=@"Music reaction style"; [self.popover.contentViewController.view addSubview:self.musicStyle];
-    self.audioButton.toolTip=@"Pulse the selected colour with computer sound. Requires macOS recording permission. Audio is processed locally and never saved.";
-    [self button:@"Disconnect" action:@selector(disconnect:) x:20 y:31 width:144];
-    [self button:@"Quit LightBar" action:@selector(quit:) x:176 y:31 width:144];
+    [self buildInterface];
     [self enableControls:NO]; self.connectButton.enabled=NO;
-    self.central=[[CBCentralManager alloc] initWithDelegate:self queue:dispatch_get_main_queue() options:@{CBCentralManagerOptionShowPowerAlertKey:@YES}];
-    self.panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,340,670) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable backing:NSBackingStoreBuffered defer:NO];
+    self.panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,440,732) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
     self.panel.title=@"LightBar"; self.panel.releasedWhenClosed=NO; self.panel.hidesOnDeactivate=NO;
+    self.panel.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    self.panel.titlebarAppearsTransparent=YES; self.panel.backgroundColor=[NSColor colorWithSRGBRed:0.055 green:0.065 blue:0.085 alpha:1];
     self.panel.contentViewController=self.popover.contentViewController;
+    if([NSProcessInfo.processInfo.arguments containsObject:@"--preview"]) {
+        self.status.stringValue=@"Ready to connect";
+        [self.panel.contentView layoutSubtreeIfNeeded];
+        NSView *view=self.popover.contentViewController.view;
+        NSBitmapImageRep *rep=[view bitmapImageRepForCachingDisplayInRect:view.bounds];
+        [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
+        [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"/private/tmp/LightBar-preview.png" atomically:YES];
+        [NSApp terminate:nil]; return;
+    }
+    self.central=[[CBCentralManager alloc] initWithDelegate:self queue:dispatch_get_main_queue() options:@{CBCentralManagerOptionShowPowerAlertKey:@YES}];
     [self.panel center];
     [self log:@"Application started"];
     [self showPanel];
@@ -199,6 +226,7 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 - (void)power:(NSButton *)b { [self stopAudioRestoring:YES]; BOOL on=[b.title isEqualToString:@"Turn on"]; [self send:Power(on)]; b.title=on?@"Turn off":@"Turn on"; }
 - (void)colour:(id)sender {
     NSColor *c=[self.color.color colorUsingColorSpace:[NSColorSpace sRGBColorSpace]]; if(!c) return;
+    self.preview.lightColor=c; self.preview.needsDisplay=YES;
     if(!self.audioRequested) [self send:RGB(lround(c.redComponent*255),lround(c.greenComponent*255),lround(c.blueComponent*255))]; [self.modes selectItemAtIndex:0];
 }
 - (void)preset:(NSButton *)b {
@@ -220,7 +248,7 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     self.audio.onBands=^(AudioBands bands){ LightBar *owner=weakSelf; if(owner.audioRequested) owner.bands=bands; };
     self.audio.onStarted=^{
         LightBar *owner=weakSelf; if(!owner||!owner.audioRequested||generation!=owner.audioGeneration) return;
-        owner.audioStarted=YES; owner.audioButton.title=@"Stop reacting to audio";
+        owner.audioStarted=YES; owner.audioButton.title=@"Stop music sync";
         [owner send:Power(YES)]; owner.powerButton.title=@"Turn off";
         [owner send:Brightness(owner.brightness.intValue)];
         [owner showStatus:@"Reacting to Mac audio · play some music"];
@@ -239,32 +267,25 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     if(!self.audioRequested||!self.audioStarted||!self.writer) return;
     double rms=NSProcessInfo.processInfo.systemUptime-self.lastAudioSample>0.3?0:self.audioPeak; self.audioPeak=0;
     double now=NSProcessInfo.processInfo.systemUptime;
-    NSInteger style=self.musicStyle.indexOfSelectedItem;
-    double input=rms;
-    if(style==3) input=self.bands.bass;
-    if(style==4) input=self.bands.mid;
     if(now-self.lastAudioSample>0.3) self.bands=(AudioBands){0};
-    double level=AudioTarget(input,self.sensitivity.doubleValue);
-    BOOL beat=level>0.08 && level>self.averageLevel*1.45+0.06 && now-self.lastBeat>0.26;
-    self.averageLevel=self.averageLevel*0.91+level*0.09;
-    if(beat) { self.lastBeat=now; self.beatGlow=1; self.musicHue=fmod(self.musicHue+0.075,1.0); }
-    else self.beatGlow*=0.68;
-    double target=(style==1||style==4) ? level*0.8 : MAX(level*0.55,self.beatGlow*level);
-    self.audioEnvelope=AudioEnvelope(target,self.audioEnvelope);
-    self.audioMeter.doubleValue=self.audioEnvelope;
-    // Real-time frames are disposable. Never queue stale audio behind Bluetooth backpressure.
+    double gain=self.sensitivity.doubleValue;
+    double bass=AudioTarget(self.bands.bass,gain), mid=AudioTarget(self.bands.mid,gain), high=AudioTarget(self.bands.treble,gain);
+    double level=AudioTarget(rms,gain);
+    BOOL beat=bass>0.08 && bass>self.averageLevel*1.4+0.06 && now-self.lastBeat>0.26;
+    self.averageLevel=self.averageLevel*0.91+bass*0.09;
+    if(beat) { self.lastBeat=now; self.beatGlow=1; } else self.beatGlow*=0.68;
+    self.audioEnvelope=AudioEnvelope(MIN(1.0,level*0.7+self.beatGlow*bass*0.4),self.audioEnvelope);
+    self.bassMeter.doubleValue=bass; self.midMeter.doubleValue=mid; self.trebleMeter.doubleValue=high;
+    double total=self.bands.left+self.bands.right;
+    double pan=total>0.002?(self.bands.right-self.bands.left)/total:0;
+    // Warm bass, violet mids and cyan highs, gently biased by stereo balance.
+    double red=bass+mid*0.55+MAX(0,-pan)*0.15*level;
+    double green=bass*0.22+high*0.7;
+    double blue=mid*0.85+high+MAX(0,pan)*0.15*level;
+    double peak=MAX(0.001,MAX(red,MAX(green,blue)));
+    NSColor *c=[NSColor colorWithSRGBRed:MIN(1,red/peak) green:MIN(1,green/peak) blue:MIN(1,blue/peak) alpha:1];
+    self.preview.lightColor=c; self.preview.intensity=self.audioEnvelope; self.preview.needsDisplay=YES;
     if(self.pending.count||!self.light.canSendWriteWithoutResponse) return;
-    NSColor *c=[self.color.color colorUsingColorSpace:NSColorSpace.sRGBColorSpace]; if(!c) return;
-    if(style==2) c=[NSColor colorWithCalibratedHue:self.musicHue saturation:0.85 brightness:1 alpha:1];
-    if(style==5) {
-        double bass=AudioTarget(self.bands.bass,self.sensitivity.doubleValue), mid=AudioTarget(self.bands.mid,self.sensitivity.doubleValue), high=AudioTarget(self.bands.treble,self.sensitivity.doubleValue);
-        double maxBand=MAX(bass,MAX(mid,high)); if(maxBand>0) c=[NSColor colorWithSRGBRed:bass/maxBand green:mid/maxBand blue:high/maxBand alpha:1];
-    }
-    if(style==6) {
-        double total=self.bands.left+self.bands.right;
-        double pan=total>0.002?(self.bands.right-self.bands.left)/total:0;
-        c=[NSColor colorWithCalibratedHue:0.58+0.25*pan saturation:0.85 brightness:1 alpha:1];
-    }
     c=[c colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
     double a=self.audioEnvelope;
     [self.light writeValue:Music(lround(c.redComponent*255*a),lround(c.greenComponent*255*a),lround(c.blueComponent*255*a)) forCharacteristic:self.writer type:CBCharacteristicWriteWithoutResponse];
@@ -273,7 +294,7 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     if(!self.audioRequested && !self.audio) return;
     BOOL started=self.audioStarted; self.audioRequested=NO; self.audioStarted=NO; self.audioGeneration++;
     [self.audioTimer invalidate]; self.audioTimer=nil; [self.audio stop]; self.audio=nil;
-    self.bands=(AudioBands){0}; self.audioPeak=0; self.audioEnvelope=0; self.averageLevel=0; self.beatGlow=0; self.lastBeat=0; self.audioMeter.doubleValue=0; self.audioButton.title=@"React to Mac audio";
+    self.bands=(AudioBands){0}; self.audioPeak=0; self.audioEnvelope=0; self.averageLevel=0; self.beatGlow=0; self.lastBeat=0; self.bassMeter.doubleValue=0; self.midMeter.doubleValue=0; self.trebleMeter.doubleValue=0; self.audioButton.title=@"Start music sync";
     if(restore && started && self.writer && self.light.state==CBPeripheralStateConnected) {
         [self.pending removeAllObjects];
         NSData *look=nil;

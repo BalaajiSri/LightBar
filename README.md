@@ -1,12 +1,14 @@
 # LightBar
 
-A native macOS menu bar app for Bluetooth LED lights using duoCo StripX-compatible controllers. Includes power, colour, brightness, built-in animations, and reactions to computer audio.
+A native macOS menu bar app for Bluetooth LED lights using duoCo StripX-compatible controllers. Includes power, colour, brightness, built-in animations, and one adaptive computer-audio music mode.
+
+![LightBar interface](Docs/interface.png)
 
 ## Download and install
 
 Download **LightBar-macOS-universal.zip** from [Releases](https://github.com/BalaajiSri/LightBar/releases/latest). Unzip it, move **LightBar.app** to **Applications**, and open it. Click the 💡 menu bar icon to open the controls.
 
-Requires **macOS 13 or newer**, on Apple Silicon or Intel. This release is for Macs, not iPhone, iPad, Android, Windows, or Linux. Private repository downloads require signing in to a GitHub account with repository access.
+Requires **macOS 13 or newer**, on Apple Silicon or Intel. This release is for Macs, not iPhone, iPad, Android, Windows, or Linux. Downloads are public; no GitHub account is required.
 
 The app is locally ad-hoc signed and is not Apple-notarized. macOS may require approval under **System Settings → Privacy & Security → Open Anyway** after your first attempt to open it.
 
@@ -23,13 +25,13 @@ If the menu bar is crowded, macOS may hide the icon near the notch. Reopen Light
 
 ## React to computer audio
 
-Connect the light, choose a music style, and click **React to Mac audio**. Play audio and adjust sensitivity and brightness. The current release includes Beat pulse, Smooth glow, Colour flow, Bass pulse, Voice-range glow, Spectrum colour, and Stereo colour.
+Connect the light and click **Start music sync**. One adaptive mix combines warm bass, violet middle frequencies, cyan treble, bass-onset accents, and a gentle colour bias from stereo balance. Live meters show the three frequency bands. Play audio and adjust sensitivity and brightness. Built-in device animations remain available under **Animations…**.
 
 Allow LightBar under **System Settings → Privacy & Security → Screen & System Audio Recording** (called Screen Recording on some versions), then quit and reopen if requested. Replacing an ad-hoc signed build can invalidate the previous permission entry. If capture is denied despite an enabled switch, remove the LightBar entry, add the installed copy from Applications, and enable it again.
 
 Audio is processed locally using Apple's ScreenCaptureKit; no audio is saved or uploaded. Only audio output is processed, with microphone capture disabled. macOS may show a recording indicator because the framework uses a display filter. Some protected audio may be unavailable.
 
-Bass, middle-frequency energy, treble, and stereo balance come from audio analysis. Voice-range glow is not isolated-vocal detection. Onsets are not exact tempo tracking. Known Bluetooth streaming commands affect the **whole bar**; independent region control has not been verified. The single combined music experience discussed during development is not implemented in this release.
+Bass, middle-frequency energy, treble, and stereo balance come from audio analysis. Middle-frequency analysis includes instruments as well as vocals; it does not isolate the singer. Onsets are not exact tempo tracking. Known Bluetooth streaming commands affect the **whole bar**; independent region control has not been verified. The combined music mode controls the whole bar; it does not claim region or per-pixel control.
 
 Stop restores the selected colour or animation. Capture also stops on disconnect, quit, or a capture error. Closing the panel leaves the app running; use **Quit LightBar** to exit.
 
@@ -58,3 +60,7 @@ Developed with a **MELK-OA21** controller. Other duoCo StripX devices may differ
 Protocol research and effect names are based on [Corner-Floor-Lamp-Controller](https://github.com/wxx9248/Corner-Floor-Lamp-Controller). Third-party material retains its original rights; this repository does not grant a separate license to that material.
 
 Diagnostic connection and command events are written locally to `LightBar.log` in the macOS user temporary directory. Captured audio and audio-level streams are not logged. Live music effects require testing with each physical controller; automated signal and protocol checks cannot verify visible LED response.
+
+## App design
+
+The app has a custom macOS icon, a persistent control panel, and a menu bar shortcut. The screenshot above is a rendered disconnected-state preview, not evidence of a connected light. The new combined effect has automated protocol and signal-analysis coverage; visible behaviour on individual controllers still needs user testing.
