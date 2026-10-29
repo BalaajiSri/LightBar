@@ -3,6 +3,7 @@
 #import "AudioCapture.h"
 #import "AudioMath.h"
 #import "Appearance.h"
+#import "AnimationSync.h"
 
 static NSData *Frame(uint8_t len,uint8_t op,uint8_t a,uint8_t b,uint8_t c,uint8_t d,uint8_t e) {
     uint8_t bytes[]={0x7e,len,op,a,b,c,d,e,0xef}; return [NSData dataWithBytes:bytes length:9];
@@ -45,6 +46,13 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 @property BOOL audioRequested, audioStarted;
 @property NSUInteger audioGeneration;
 @property MusicEngine musicEngine;
+@property (strong) NSPanel *studioPanel;
+@property (strong) NSButton *animationLayer, *studioSyncButton;
+@property (strong) NSPopUpButton *studioPattern;
+@property (strong) NSSlider *referenceSpeed;
+@property (strong) NSTextField *studioTempo;
+@property double lastAnimationSpeedTime;
+@property int lastAnimationSpeed, lastAnimationBrightness;
 @property (strong) NSPopUpButton *paletteMenu;
 @property (strong) NSPanel *palettePanel;
 @property (strong) NSArray<NSColorWell *> *paletteWells;
@@ -116,8 +124,8 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     self.sensitivity=[NSSlider sliderWithValue:2 minValue:0.5 maxValue:8 target:nil action:nil]; self.sensitivity.frame=NSMakeRect(139,115,263,22); self.sensitivity.accessibilityLabel=@"Audio sensitivity"; [self.popover.contentViewController.view addSubview:self.sensitivity];
     self.experimentalSwitch=[NSButton checkboxWithTitle:@"Experimental BPM" target:self action:@selector(toggleExperimental:)]; self.experimentalSwitch.frame=NSMakeRect(36,78,230,24); self.experimentalSwitch.font=[NSFont systemFontOfSize:12]; [self.popover.contentViewController.view addSubview:self.experimentalSwitch];
     [self button:@"Live view ↗" action:@selector(showExperiment:) x:298 y:77 width:108];
-    [self button:@"Animations…" action:@selector(showAnimations:) x:20 y:17 width:110];
-    [self button:@"Disconnect" action:@selector(disconnect:) x:140 y:17 width:110];
+    [self button:@"Animation Studio" action:@selector(showStudio:) x:20 y:17 width:140];
+    [self button:@"Disconnect" action:@selector(disconnect:) x:168 y:17 width:112];
     [self button:@"Quit LightBar" action:@selector(quit:) x:290 y:17 width:130];
     // Keep animations in a separate native menu to give the main panel breathing room.
     self.modes=[[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO]; [self.modes addItemWithTitle:@"Choose an effect…"]; self.modes.lastItem.tag=-1;
@@ -176,6 +184,51 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     }
     [self.experimentPanel makeKeyAndOrderFront:nil];
 }
+- (NSTextField *)studioText:(NSString *)text frame:(NSRect)frame size:(CGFloat)size {
+    NSTextField *label=[NSTextField wrappingLabelWithString:text]; label.frame=frame; label.font=[NSFont systemFontOfSize:size]; [self.studioPanel.contentView addSubview:label]; return label;
+}
+- (void)showStudio:(id)sender {
+    if(!self.studioPanel) {
+        self.studioPanel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,460,350) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable backing:NSBackingStoreBuffered defer:NO]; self.studioPanel.title=@"Animation Studio · Experimental"; self.studioPanel.releasedWhenClosed=NO; self.studioPanel.hidesOnDeactivate=NO; self.studioPanel.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+        self.studioPanel.contentView=[[MusicLabCanvas alloc] initWithFrame:NSMakeRect(0,0,460,350)];
+        [self studioText:@"Movement meets music" frame:NSMakeRect(24,302,412,32) size:24];
+        self.animationLayer=[NSButton checkboxWithTitle:@"Add built-in animation to music sync" target:self action:@selector(animationLayerChanged:)]; self.animationLayer.frame=NSMakeRect(24,262,412,28); [self.studioPanel.contentView addSubview:self.animationLayer];
+        self.studioPattern=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(22,219,416,30) pullsDown:NO];
+        for(NSMenuItem *item in self.modes.itemArray) { if(item.tag<0)continue; [self.studioPattern addItemWithTitle:item.title]; self.studioPattern.lastItem.tag=item.tag; }
+        [self.studioPattern selectItemWithTag:83]; self.studioPattern.target=self; self.studioPattern.action=@selector(animationLayerChanged:); self.studioPattern.accessibilityLabel=@"Music animation pattern"; [self.studioPanel.contentView addSubview:self.studioPattern];
+        [self studioText:@"Reference speed · adjust until movement feels right" frame:NSMakeRect(24,183,412,24) size:12];
+        self.referenceSpeed=[NSSlider sliderWithValue:50 minValue:1 maxValue:100 target:self action:@selector(animationReferenceChanged:)]; self.referenceSpeed.frame=NSMakeRect(24,153,412,24); self.referenceSpeed.continuous=NO; self.referenceSpeed.accessibilityLabel=@"Reference animation speed"; [self.studioPanel.contentView addSubview:self.referenceSpeed];
+        self.studioTempo=[self studioText:@"Start music sync to estimate tempo." frame:NSMakeRect(24,119,412,24) size:12]; self.studioTempo.textColor=NSColor.systemTealColor;
+        NSTextField *note=[self studioText:@"Uses built-in colours. Bass accents brightness; tempo adjusts speed. Timing is approximate and needs testing on your light." frame:NSMakeRect(24,66,412,45) size:11]; note.textColor=NSColor.secondaryLabelColor;
+        self.studioSyncButton=[NSButton buttonWithTitle:(self.audioRequested?@"Stop music sync":@"Start music sync") target:self action:@selector(toggleAudio:)]; self.studioSyncButton.frame=NSMakeRect(24,20,200,30); self.studioSyncButton.enabled=self.writer!=nil; [self.studioPanel.contentView addSubview:self.studioSyncButton];
+        NSButton *browse=[NSButton buttonWithTitle:@"Static animations…" target:self action:@selector(showAnimations:)]; browse.frame=NSMakeRect(236,20,200,30); [self.studioPanel.contentView addSubview:browse];
+        [self.studioPanel center];
+    }
+    [self.studioPanel makeKeyAndOrderFront:nil];
+}
+- (BOOL)usingAnimationLayer { return self.animationLayer.state==NSControlStateValueOn && self.animationLayer!=nil; }
+- (void)animationReferenceChanged:(id)sender { self.lastAnimationSpeed=-1; self.lastAnimationSpeedTime=0; }
+- (void)animationLayerChanged:(id)sender {
+    self.lastAnimationSpeed=-1; self.lastAnimationBrightness=-1; self.lastAnimationSpeedTime=0;
+    if(!self.audioStarted||!self.writer) return;
+    [self.pending removeAllObjects];
+    if([self usingAnimationLayer]) { [self send:Power(YES)]; [self send:Mode((int)self.studioPattern.selectedItem.tag)]; [self send:Brightness(self.brightness.intValue)]; [self showStatus:@"Animation layer · built-in colours, audio-driven movement"]; }
+    else { [self send:Brightness(self.brightness.intValue)]; [self showStatus:@"Colour music sync · palette restored"]; }
+}
+- (void)updateMusicAnimation:(double)now level:(double)level {
+    MusicEngine engine=self.musicEngine;
+    double confidence=now-engine.lastSignal<2?engine.confidence:0;
+    int speed=AnimationTempoSpeed(self.referenceSpeed.doubleValue,engine.bpm,confidence);
+    self.studioTempo.stringValue=confidence>0.35?[NSString stringWithFormat:@"≈ %.0f BPM · speed %d%% · approximate timing",engine.bpm,speed]:@"Learning tempo · using reference speed";
+    if(self.pending.count||!self.light.canSendWriteWithoutResponse) return;
+    if(now-self.lastAnimationSpeedTime>=1 && (self.lastAnimationSpeed<0||abs(speed-self.lastAnimationSpeed)>=3)) {
+        [self.light writeValue:Speed(speed) forCharacteristic:self.writer type:CBCharacteristicWriteWithoutResponse]; self.lastAnimationSpeed=speed; self.lastAnimationSpeedTime=now; return;
+    }
+    int brightness=AnimationMusicBrightness(self.brightness.doubleValue,level,self.audioEnvelope);
+    if(self.lastAnimationBrightness<0||abs(brightness-self.lastAnimationBrightness)>=2) {
+        [self.light writeValue:Brightness(brightness) forCharacteristic:self.writer type:CBCharacteristicWriteWithoutResponse]; self.lastAnimationBrightness=brightness;
+    }
+}
 - (void)showAnimations:(NSButton *)sender {
     if(!self.writer) return;
     NSMenu *menu=[[NSMenu alloc] initWithTitle:@"Animations"];
@@ -198,12 +251,13 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     self.panel.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     self.panel.titlebarAppearsTransparent=YES; self.panel.backgroundColor=[NSColor colorWithSRGBRed:0.055 green:0.065 blue:0.085 alpha:1];
     self.panel.contentViewController=self.popover.contentViewController;
-    if([NSProcessInfo.processInfo.arguments containsObject:@"--preview"] || [NSProcessInfo.processInfo.arguments containsObject:@"--preview-experiment"] || [NSProcessInfo.processInfo.arguments containsObject:@"--preview-palette"]) {
+    if([NSProcessInfo.processInfo.arguments containsObject:@"--preview"] || [NSProcessInfo.processInfo.arguments containsObject:@"--preview-experiment"] || [NSProcessInfo.processInfo.arguments containsObject:@"--preview-palette"] || [NSProcessInfo.processInfo.arguments containsObject:@"--preview-studio"]) {
         self.status.stringValue=@"Ready to connect";
         [self.panel.contentView layoutSubtreeIfNeeded];
         NSView *view=self.popover.contentViewController.view;
         if([NSProcessInfo.processInfo.arguments containsObject:@"--preview-experiment"]) { [self showExperiment:nil]; view=self.experimentPanel.contentView; }
         if([NSProcessInfo.processInfo.arguments containsObject:@"--preview-palette"]) { [self editPalette:nil]; view=self.palettePanel.contentView; }
+        if([NSProcessInfo.processInfo.arguments containsObject:@"--preview-studio"]) { [self showStudio:nil]; view=self.studioPanel.contentView; }
         NSBitmapImageRep *rep=[view bitmapImageRepForCachingDisplayInRect:view.bounds];
         [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
         [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"/private/tmp/LightBar-preview.png" atomically:YES];
@@ -219,7 +273,7 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
 }
 - (void)showPanel { [NSApp activateIgnoringOtherApps:YES]; [self.panel makeKeyAndOrderFront:nil]; [self log:@"Control panel opened"]; }
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)app hasVisibleWindows:(BOOL)flag { [self showPanel]; return YES; }
-- (void)enableControls:(BOOL)on { for(NSControl *c in self.lightControls) c.enabled=on; }
+- (void)enableControls:(BOOL)on { self.studioSyncButton.enabled=on; for(NSControl *c in self.lightControls) c.enabled=on; }
 - (void)showStatus:(NSString *)text { self.status.stringValue=text; [self log:text]; }
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central {
     if(central.state==CBManagerStatePoweredOn) { [self scan:nil]; }
@@ -320,14 +374,15 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     self.audio.onLevel=^(double rms){ LightBar *owner=weakSelf; if(!owner.audioRequested) return; owner.audioPeak=MAX(owner.audioPeak,rms); owner.lastAudioSample=NSProcessInfo.processInfo.systemUptime; };
     self.audio.onBands=^(AudioBands bands){
         LightBar *owner=weakSelf; if(!owner.audioRequested) return; owner.bands=bands;
-        if(owner.experimentalSwitch.state==NSControlStateValueOn) { MusicEngine engine=owner.musicEngine; double gain=owner.sensitivity.doubleValue; MusicFeed(&engine,NSProcessInfo.processInfo.systemUptime,AudioTarget(bands.bass,gain),AudioTarget(bands.mid,gain),AudioTarget(bands.treble,gain)); owner.musicEngine=engine; }
+        if(owner.experimentalSwitch.state==NSControlStateValueOn || [owner usingAnimationLayer]) { MusicEngine engine=owner.musicEngine; double gain=owner.sensitivity.doubleValue; MusicFeed(&engine,NSProcessInfo.processInfo.systemUptime,AudioTarget(bands.bass,gain),AudioTarget(bands.mid,gain),AudioTarget(bands.treble,gain)); owner.musicEngine=engine; }
     };
     self.audio.onSpectrum=^(NSArray<NSNumber *> *bins){ LightBar *owner=weakSelf; if(owner.audioRequested && owner.experimentalSwitch.state==NSControlStateValueOn) [owner.spectrogram appendSpectrum:bins]; };
     self.audio.onStarted=^{
         LightBar *owner=weakSelf; if(!owner||!owner.audioRequested||generation!=owner.audioGeneration) return;
-        owner.audioStarted=YES; owner.audioButton.title=@"Stop music sync";
+        owner.audioStarted=YES; owner.audioButton.title=@"Stop music sync"; owner.studioSyncButton.title=@"Stop music sync";
         [owner send:Power(YES)]; owner.powerButton.title=@"Turn off";
         [owner send:Brightness(owner.brightness.intValue)];
+        if([owner usingAnimationLayer]) [owner animationLayerChanged:nil];
         [owner showStatus:@"Reacting to Mac audio · play some music"];
         owner.audioTimer=[NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer){ [weakSelf audioTick]; }];
         [[NSRunLoop mainRunLoop] addTimer:owner.audioTimer forMode:NSRunLoopCommonModes];
@@ -375,6 +430,12 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
         NSColor *target=[NSColor colorWithSRGBRed:MIN(1,r) green:MIN(1,g) blue:MIN(1,b) alpha:1];
         self.blendedPalette=self.blendedPalette?[self.blendedPalette blendedColorWithFraction:(self.experimentalSwitch.state==NSControlStateValueOn?0.16:0.35) ofColor:target]:target; c=self.blendedPalette;
     }
+    if([self usingAnimationLayer]) {
+        self.preview.lightColor=NSColor.whiteColor; self.preview.intensity=self.audioEnvelope; self.preview.needsDisplay=YES;
+        self.preview.toolTip=@"Animation brightness preview · physical colours come from the built-in pattern";
+        [self updateMusicAnimation:now level:level]; return;
+    }
+    self.preview.toolTip=@"Colour preview · whole bar output";
     self.preview.lightColor=c; self.preview.intensity=self.audioEnvelope; self.preview.needsDisplay=YES;
     if(self.pending.count||!self.light.canSendWriteWithoutResponse) return;
     c=[c colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
@@ -386,11 +447,13 @@ static NSData *Speed(int p) { return Frame(4,2,MAX(0,MIN(100,p)),255,255,255,0);
     BOOL started=self.audioStarted; self.audioRequested=NO; self.audioStarted=NO; self.audioGeneration++;
     [self.audioTimer invalidate]; self.audioTimer=nil; [self.audio stop]; self.audio=nil;
     self.musicEngine=(MusicEngine){0}; [self.spectrogram clear]; self.tempoLabel.stringValue=@"Music sync stopped"; self.confidenceLabel.stringValue=@"Start music sync to estimate the beat.";
-    self.bands=(AudioBands){0}; self.audioPeak=0; self.audioEnvelope=0; self.averageLevel=0; self.beatGlow=0; self.lastBeat=0; self.bassMeter.doubleValue=0; self.midMeter.doubleValue=0; self.trebleMeter.doubleValue=0; self.audioButton.title=@"Start music sync";
+    self.bands=(AudioBands){0}; self.audioPeak=0; self.audioEnvelope=0; self.averageLevel=0; self.beatGlow=0; self.lastBeat=0; self.bassMeter.doubleValue=0; self.midMeter.doubleValue=0; self.trebleMeter.doubleValue=0; self.audioButton.title=@"Start music sync"; self.studioSyncButton.title=@"Start music sync"; self.studioTempo.stringValue=@"Music sync stopped";
     if(restore && started && self.writer && self.light.state==CBPeripheralStateConnected) {
         [self.pending removeAllObjects];
         NSData *look=nil;
-        if(self.modes.selectedItem.tag>=0) look=Mode((int)self.modes.selectedItem.tag);
+        if([self usingAnimationLayer] && self.light.canSendWriteWithoutResponse) [self.light writeValue:Brightness(self.brightness.intValue) forCharacteristic:self.writer type:CBCharacteristicWriteWithoutResponse];
+        if([self usingAnimationLayer]) look=Mode((int)self.studioPattern.selectedItem.tag);
+        else if(self.modes.selectedItem.tag>=0) look=Mode((int)self.modes.selectedItem.tag);
         else { NSColor *c=[self.color.color colorUsingColorSpace:NSColorSpace.sRGBColorSpace]; look=RGB(lround(c.redComponent*255),lround(c.greenComponent*255),lround(c.blueComponent*255)); }
         if(self.light.canSendWriteWithoutResponse) [self.light writeValue:look forCharacteristic:self.writer type:CBCharacteristicWriteWithoutResponse]; else [self send:look];
         [self showStatus:@"Audio stopped · returned to selected colour or mode"];
@@ -423,6 +486,9 @@ int main(int argc,const char *argv[]) {
             printf("Frequency and stereo checks: %s\n",ok?"PASS":"FAIL");
             printf("Audio level, silence, sensitivity, and decay checks: %s\n",ok?"PASS":"FAIL");
             ok=MusicEngineTests() && ok;
+            ok=ok && AnimationTempoSpeed(50,120,1)==50 && AnimationTempoSpeed(50,180,1)==75 && AnimationTempoSpeed(50,0,0)==50 && AnimationTempoSpeed(90,180,1)==100;
+            ok=ok && AnimationMusicBrightness(70,0,1)==0 && AnimationMusicBrightness(70,1,1)==70 && AnimationMusicBrightness(30,1,2)==30 && AnimationMusicBrightness(70,NAN,1)==0;
+            printf("Animation speed and brightness bounds: %s\n",ok?"PASS":"FAIL");
             printf("Protocol frame checks: %s\n",ok?"PASS":"FAIL"); return ok?0:1;
         }
         NSApplication *app=[NSApplication sharedApplication]; [app setActivationPolicy:NSApplicationActivationPolicyAccessory];

@@ -93,3 +93,22 @@ Use the palette menu under **Music, in colour** in either the classic or experim
 Palette changes apply during music playback without restarting capture. Colours blend according to relative frequency energy; experimental mode blends more gradually. The chosen palette and custom colours are stored locally and restored on the next launch. The bar still shows one mixed colour at a time. The app's audio-capture implementation is unchanged in this update.
 
 ![Custom music colours](Docs/palettes.png)
+
+## Animation Studio (0.5 prerelease)
+
+Open **Animation Studio** from the main panel. This new section adds an optional built-in-animation layer to music sync:
+
+1. Choose a pattern (the initial selection is **7-Color Wave**).
+2. Enable **Add built-in animation to music sync**.
+3. Start music sync from either window.
+4. Adjust **Reference speed** until movement feels appropriate.
+
+Tempo analysis runs when the animation layer is enabled, including when the separate Experimental BPM renderer is off. Once rhythm confidence is sufficient, the controller speed setting scales from the reference speed using estimated BPM / 120, clamped to 1–100. This is an uncalibrated heuristic: different animations can interpret speed differently, and it does not phase-lock a movement to the beat. With uncertain tempo, reference speed is used.
+
+The existing audio envelope (classic or experimental) drives brightness accents, capped by the main brightness slider. Silence dims the pattern to zero. Speed commands are limited to about once per second; brightness updates use the existing audio tick and Bluetooth backpressure checks. Live colour streaming is suspended while the built-in pattern runs so those commands do not override it.
+
+Built-in patterns use their own colours. Custom music palettes resume when you disable the animation layer. The main preview shows animation intensity using a neutral colour, not the pattern's actual regional colours. On stopping music sync, brightness is restored and the selected pattern remains as a static controller effect. **Static animations…** retains access to the previous built-in-animation menu.
+
+The section starts with the layer off. The audio-capture implementation is unchanged. Synthetic signal, tempo, protocol, speed-scaling, brightness-cap and silence checks pass; the panel was visually inspected. Whether this controller preserves each pattern while changing brightness/speed still requires a physical-light trial.
+
+![Animation Studio before connection](Docs/animation-studio.png)

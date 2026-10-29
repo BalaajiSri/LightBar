@@ -1,26 +1,16 @@
-## Music colour palettes
+## Animation Studio · Experimental
 
-Choose Neon, Sunset, Aurora, Ember or Ocean, keep a single chosen colour, or create your own three-colour music palette. Edit colours for bass, mids and treble separately; changes blend live during both classic music sync and Experimental BPM. Palette and custom colours are saved locally.
+New separate section for built-in lamp animations driven by computer audio. Existing colour-based music sync and Experimental BPM remain available.
 
-The audio-capture implementation is unchanged from 0.4.0. The existing and experimental music reactions remain available. This update passed existing audio, tempo and protocol checks and the controls were visually inspected. Preset appearance on the physical light still needs user testing.
+- Pattern selector, initially 7-Color Wave.
+- Optional animation layer, off by default.
+- Reference-speed adjustment and estimated BPM display.
+- Tempo-influenced animation speed and audio/bass brightness accents.
+- Switch the layer off to return to music palettes.
+- Original static-animation controls remain available in the Studio.
 
-## Experimental BPM + spectrum lab
+Built-in patterns use the controller's own colours; custom palettes cannot be superimposed on them with the verified protocol. Speed scaling is a heuristic, not calibrated BPM or phase lock. This feature needs testing on the physical light to verify brightness/speed changes preserve the selected animation.
 
-An optional addition to the existing music sync. The experimental switch starts off; enabling it opens the music lab.
+The audio-capture implementation is unchanged. Existing protocol/audio/tempo checks plus animation-speed and brightness bounds pass; both Mac architectures build and the panel was rendered and visually checked. Intel runtime remains untested.
 
-- Estimated BPM with a heuristic rhythm-confidence indicator.
-- Bass-weighted beat accents and energy-dependent pulse strength.
-- Smooth spectral colour diffusion during quiet passages.
-- Stereo-biased colour and brighter accents as the music builds.
-- A scrolling, 16-band frequency history in the app.
-- The existing music reaction remains available with the switch off.
-
-Download **LightBar-macOS-universal.zip**, unzip, and install LightBar.app in Applications. Supports macOS 13+ on Apple Silicon and Intel. Runtime checks ran on Apple Silicon; Intel runtime is untested.
-
-Start music sync and turn on **Experimental BPM**. Give it several seconds of steady rhythm. Tempo estimates can be half/double the song's beat; the search range is approximately 60–180 BPM. Uncertain rhythm uses spectrum/onset response instead. This prerelease needs real-song testing.
-
-The physical bar is still controlled as one colour; the frequency history is displayed in the app. No per-region control or isolated-vocal detection is claimed. Audio is processed locally without saving or uploading it.
-
-Synthetic tempo, missing-beat, frequency, stereo, silence, bounded-output, and protocol checks passed. Both Mac architectures were built, the signature was verified, and both panels were visually checked.
-
-The app is ad-hoc signed and not Apple-notarized. As with previous builds, macOS can require Open Anyway and renewed Bluetooth/recording permission for an updated app. Use the installed copy in Applications.
+Download LightBar-macOS-universal.zip, unzip and move LightBar.app to Applications. Requires macOS 13+. The app is ad-hoc signed and not notarized. Updated builds may need renewed Bluetooth or Screen & System Audio Recording permission. Use the installed copy in Applications.
